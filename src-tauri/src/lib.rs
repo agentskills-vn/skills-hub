@@ -111,7 +111,7 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|app, event| {
-            if let tauri::RunEvent::Reopen { .. } = event {
+            if matches!(event, tauri::RunEvent::Resumed) {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();
                     let _ = window.set_focus();
