@@ -11,8 +11,10 @@ import SkillDetailView from './components/skills/SkillDetailView'
 import Header from './components/skills/Header'
 import LoadingOverlay from './components/skills/LoadingOverlay'
 import SkillsList from './components/skills/SkillsList'
+import TagsPage from './components/skills/TagsPage'
 import AddSkillModal from './components/skills/modals/AddSkillModal'
 import DeleteModal from './components/skills/modals/DeleteModal'
+import EditSkillTagsModal from './components/skills/modals/EditSkillTagsModal'
 import GitPickModal from './components/skills/modals/GitPickModal'
 import LocalPickModal from './components/skills/modals/LocalPickModal'
 import ImportModal from './components/skills/modals/ImportModal'
@@ -28,6 +30,7 @@ import type {
   ManagedSkill,
   OnboardingPlan,
   OnlineSkillDto,
+  TagWithCountDto,
   ToolOption,
   ToolStatusDto,
   UpdateResultDto,
@@ -100,9 +103,15 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState<'updated' | 'name'>('updated')
   const [scopeFilter, setScopeFilter] = useState<'all' | 'global' | 'project'>('all')
-  const [activeView, setActiveView] = useState<'myskills' | 'explore' | 'detail' | 'settings'>('myskills')
+  const [activeView, setActiveView] = useState<'myskills' | 'explore' | 'detail' | 'settings' | 'tags'>('myskills')
   const [detailSkill, setDetailSkill] = useState<ManagedSkill | null>(null)
+  const [tags, setTags] = useState<TagWithCountDto[]>([])
+  const [selectedTagIds, setSelectedTagIds] = useState<number[]>([])
+  const [includeUntagged, setIncludeUntagged] = useState(false)
+  const [tagEditorSkill, setTagEditorSkill] = useState<ManagedSkill | null>(null)
+  const [pendingDeleteTag, setPendingDeleteTag] = useState<TagWithCountDto | null>(null)
   const [addModalTab, setAddModalTab] = useState<'local' | 'git'>('git')
+  const [addModalTagIds, setAddModalTagIds] = useState<number[]>([])
   const [featuredSkills, setFeaturedSkills] = useState<FeaturedSkillDto[]>([])
   const [featuredLoading, setFeaturedLoading] = useState(false)
   const [exploreFilter, setExploreFilter] = useState('')
@@ -277,11 +286,21 @@ function App() {
     }
   }, [invokeTauri])
 
+  const loadTags = useCallback(async () => {
+    try {
+      const result = await invokeTauri<TagWithCountDto[]>('get_tags')
+      setTags(result)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }, [invokeTauri])
+
   useEffect(() => {
     if (isTauri) {
       loadManagedSkills()
+      loadTags()
     }
-  }, [isTauri, loadManagedSkills])
+  }, [isTauri, loadManagedSkills, loadTags])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -580,13 +599,21 @@ function App() {
 
   const visibleSkills = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
+    const selectedTagSet = new Set(selectedTagIds)
+    const hasTagFilter = selectedTagIds.length > 0 || includeUntagged
     const filtered = managedSkills.filter((skill) => {
       if (scopeFilter !== 'all' && getSkillScope(skill) !== scopeFilter) return false
+      if (hasTagFilter) {
+        const matchesSelectedTag = skill.tags.some((tag) => selectedTagSet.has(tag.id))
+        const matchesUntagged = includeUntagged && skill.tags.length === 0
+        if (!matchesSelectedTag && !matchesUntagged) return false
+      }
       if (!query) return true
       return (
         skill.name.toLowerCase().includes(query) ||
         skill.central_path.toLowerCase().includes(query) ||
-        skill.source_type.toLowerCase().includes(query)
+        skill.source_type.toLowerCase().includes(query) ||
+        skill.tags.some((tag) => tag.name.toLowerCase().includes(query))
       )
     })
     const sorted = [...filtered].sort((a, b) => {
@@ -596,7 +623,19 @@ function App() {
       return (b.updated_at ?? 0) - (a.updated_at ?? 0)
     })
     return sorted
-  }, [getSkillScope, managedSkills, scopeFilter, searchQuery, sortBy])
+  }, [
+    getSkillScope,
+    includeUntagged,
+    managedSkills,
+    scopeFilter,
+    searchQuery,
+    selectedTagIds,
+    sortBy,
+  ])
+  const untaggedCount = useMemo(
+    () => managedSkills.filter((skill) => skill.tags.length === 0).length,
+    [managedSkills],
+  )
 
   const [storagePath, setStoragePath] = useState<string>(t('notAvailable'))
   const [gitCacheCleanupDays, setGitCacheCleanupDays] = useState<number>(30)
@@ -725,7 +764,7 @@ function App() {
   }, [featuredSkills.length, invokeTauri])
 
   const handleViewChange = useCallback(
-    (view: 'myskills' | 'explore') => {
+    (view: 'myskills' | 'explore' | 'tags') => {
       setActiveView(view)
       if (view === 'explore') {
         loadFeaturedSkills()
@@ -781,7 +820,23 @@ function App() {
 
   const handleOpenAdd = useCallback(() => {
     setShowAddModal(true)
+    setAddModalTagIds([])
   }, [])
+
+  const applySelectedAddModalTags = useCallback(
+    async (skillId: string, skillName: string) => {
+      if (addModalTagIds.length === 0) return
+      try {
+        await invokeTauri('set_skill_tags', {
+          skillId,
+          tagIds: addModalTagIds,
+        })
+      } catch {
+        toast.error(t('tagsApplyFailed', { name: skillName }))
+      }
+    },
+    [addModalTagIds, invokeTauri, t],
+  )
 
   const handleCancelLoading = useCallback(() => {
     void invokeTauri('cancel_current_operation').catch(() => {})
@@ -791,7 +846,10 @@ function App() {
   }, [invokeTauri])
 
   const handleCloseAdd = useCallback(() => {
-    if (!loading) setShowAddModal(false)
+    if (!loading) {
+      setShowAddModal(false)
+      setAddModalTagIds([])
+    }
   }, [loading])
 
   const handleCloseImport = useCallback(() => {
@@ -854,6 +912,139 @@ function App() {
       setScopeFilter(value)
     },
     [],
+  )
+
+  const handleToggleAddModalTag = useCallback((tagId: number) => {
+    setAddModalTagIds((current) =>
+      current.includes(tagId)
+        ? current.filter((id) => id !== tagId)
+        : [...current, tagId],
+    )
+  }, [])
+
+  const handleToggleTagFilter = useCallback((tagId: number) => {
+    setSelectedTagIds((current) =>
+      current.includes(tagId)
+        ? current.filter((id) => id !== tagId)
+        : [...current, tagId],
+    )
+  }, [])
+
+  const handleToggleUntaggedFilter = useCallback(() => {
+    setIncludeUntagged((current) => !current)
+  }, [])
+
+  const handleClearTagFilters = useCallback(() => {
+    setSelectedTagIds([])
+    setIncludeUntagged(false)
+  }, [])
+
+  const handleOpenTagsPage = useCallback(() => {
+    setActiveView('tags')
+  }, [])
+
+  const handleReviewUntagged = useCallback(() => {
+    setSelectedTagIds([])
+    setIncludeUntagged(true)
+    setActiveView('myskills')
+  }, [])
+
+  const handleViewTag = useCallback((tagId: number) => {
+    setSelectedTagIds([tagId])
+    setIncludeUntagged(false)
+    setActiveView('myskills')
+  }, [])
+
+  const handleCreateTag = useCallback(
+    async (name: string) => {
+      try {
+        await invokeTauri('create_tag', { name })
+        await loadTags()
+        setSuccessToastMessage(t('tagCreated'))
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+      }
+    },
+    [invokeTauri, loadTags, t],
+  )
+
+  const handleRenameTag = useCallback(
+    async (tagId: number, name: string) => {
+      try {
+        const renamed = await invokeTauri<{ id: number; name: string }>('rename_tag', {
+          tagId,
+          name,
+        })
+        setSelectedTagIds((current) =>
+          current.includes(tagId) ? current.map((id) => (id === tagId ? renamed.id : id)) : current,
+        )
+        await loadManagedSkills()
+        await loadTags()
+        setSuccessToastMessage(t('tagRenamed'))
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+      }
+    },
+    [invokeTauri, loadManagedSkills, loadTags, t],
+  )
+
+  const handleDeleteTag = useCallback((tag: TagWithCountDto) => {
+    setPendingDeleteTag(tag)
+  }, [])
+
+  const handleCloseDeleteTag = useCallback(() => {
+    if (!loading) setPendingDeleteTag(null)
+  }, [loading])
+
+  const handleConfirmDeleteTag = useCallback(async () => {
+    if (!pendingDeleteTag) return
+    try {
+      setLoading(true)
+      setLoadingStartAt(Date.now())
+      setActionMessage(t('actions.deletingTag', { name: pendingDeleteTag.name }))
+      await invokeTauri('delete_tag', { tagId: pendingDeleteTag.id })
+      setSelectedTagIds((current) => current.filter((id) => id !== pendingDeleteTag.id))
+      await loadManagedSkills()
+      await loadTags()
+      setPendingDeleteTag(null)
+      setSuccessToastMessage(t('tagDeleted'))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+      setLoadingStartAt(null)
+      setActionMessage(null)
+    }
+  }, [invokeTauri, loadManagedSkills, loadTags, pendingDeleteTag, t])
+
+  const handleOpenEditTags = useCallback((skill: ManagedSkill) => {
+    setTagEditorSkill(skill)
+  }, [])
+
+  const handleCloseEditTags = useCallback(() => {
+    if (!loading) setTagEditorSkill(null)
+  }, [loading])
+
+  const handleSaveSkillTags = useCallback(
+    async (skill: ManagedSkill, tagIds: number[]) => {
+      try {
+        setLoading(true)
+        setLoadingStartAt(Date.now())
+        setActionMessage(t('actions.updatingTags', { name: skill.name }))
+        await invokeTauri('set_skill_tags', { skillId: skill.id, tagIds })
+        await loadManagedSkills()
+        await loadTags()
+        setTagEditorSkill(null)
+        setSuccessToastMessage(t('tagsUpdated'))
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        setLoading(false)
+        setLoadingStartAt(null)
+        setActionMessage(null)
+      }
+    },
+    [invokeTauri, loadManagedSkills, loadTags, t],
   )
 
   const handleSyncTargetChange = useCallback(
@@ -936,7 +1127,8 @@ function App() {
 
   const handleRefresh = useCallback(() => {
     void loadManagedSkills()
-  }, [loadManagedSkills])
+    void loadTags()
+  }, [loadManagedSkills, loadTags])
 
 
   const handleReviewImport = useCallback(async () => {
@@ -1145,6 +1337,7 @@ function App() {
             name: localName.trim() || undefined,
           },
         )
+        await applySelectedAddModalTags(created.skill_id, created.name)
         {
           const selectedInstalledIds = tools
             .filter((tool) => syncTargets[tool.id] && isInstalled(tool.id))
@@ -1195,6 +1388,7 @@ function App() {
         setActionMessage(null)
         setShowAddModal(false)
         await loadManagedSkills()
+        await loadTags()
       } else {
         setLocalCandidatesBasePath(basePath)
         setLocalCandidates(candidates)
@@ -1260,6 +1454,7 @@ function App() {
             name: gitName.trim() || undefined,
           },
         )
+        await applySelectedAddModalTags(created.skill_id, created.name)
         {
           const selectedInstalledIds = tools
             .filter((tool) => syncTargets[tool.id] && isInstalled(tool.id))
@@ -1324,6 +1519,7 @@ function App() {
             name: gitName.trim() || undefined,
             },
           )
+          await applySelectedAddModalTags(created.skill_id, created.name)
           {
             const selectedInstalledIds = tools
               .filter((tool) => syncTargets[tool.id] && isInstalled(tool.id))
@@ -1393,6 +1589,7 @@ function App() {
                 name: gitName.trim() || undefined,
               },
             )
+            await applySelectedAddModalTags(created.skill_id, created.name)
             {
               const selectedInstalledIds = tools
                 .filter((tool) => syncTargets[tool.id] && isInstalled(tool.id))
@@ -1469,6 +1666,7 @@ function App() {
       setActionMessage(null)
       setShowAddModal(false)
       await loadManagedSkills()
+      await loadTags()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -1566,6 +1764,7 @@ function App() {
               name: localName.trim() || undefined,
             },
           )
+          await applySelectedAddModalTags(created.skill_id, created.name)
           {
             const selectedInstalledIds = tools
               .filter((tool) => syncTargets[tool.id] && isInstalled(tool.id))
@@ -1630,6 +1829,7 @@ function App() {
       setActionMessage(null)
       setShowAddModal(false)
       await loadManagedSkills()
+      await loadTags()
       if (collectedErrors.length > 0) showActionErrors(collectedErrors)
     } finally {
       setLoading(false)
@@ -1676,6 +1876,7 @@ function App() {
             name: gitName.trim() || undefined,
             },
           )
+          await applySelectedAddModalTags(created.skill_id, created.name)
           {
             const selectedInstalledIds = tools
               .filter((tool) => syncTargets[tool.id] && isInstalled(tool.id))
@@ -1744,6 +1945,7 @@ function App() {
       setGitCandidatesRepoUrl('')
       setShowAddModal(false)
       await loadManagedSkills()
+      await loadTags()
       if (collectedErrors.length > 0) showActionErrors(collectedErrors)
     } finally {
       setLoading(false)
@@ -1767,6 +1969,7 @@ function App() {
         return next
       })
       await loadManagedSkills()
+      await loadTags()
       setPendingDeleteId(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -2279,11 +2482,19 @@ function App() {
               sortBy={sortBy}
               searchQuery={searchQuery}
               scopeFilter={scopeFilter}
+              tags={tags}
+              selectedTagIds={selectedTagIds}
+              includeUntagged={includeUntagged}
+              untaggedCount={untaggedCount}
               totalCount={visibleSkills.length}
               loading={loading}
               onSortChange={handleSortChange}
               onSearchChange={handleSearchChange}
               onScopeFilterChange={handleScopeFilterChange}
+              onToggleTag={handleToggleTagFilter}
+              onToggleUntagged={handleToggleUntaggedFilter}
+              onClearTags={handleClearTagFilters}
+              onManageTags={handleOpenTagsPage}
               onRefresh={handleRefresh}
               t={t}
             />
@@ -2301,11 +2512,26 @@ function App() {
               onToggleTool={handleToggleToolForSkill}
               onOpenScope={handleOpenScope}
               onOpenDetail={handleOpenDetail}
+              onEditTags={handleOpenEditTags}
               getSkillScope={getSkillScope}
               getSkillProjects={getSkillProjects}
               t={t}
             />
           </div>
+        ) : activeView === 'tags' ? (
+          <TagsPage
+            tags={tags}
+            untaggedCount={untaggedCount}
+            loading={loading}
+            formatRelative={formatRelative}
+            onBack={handleBackToList}
+            onReviewUntagged={handleReviewUntagged}
+            onViewTag={handleViewTag}
+            onCreateTag={handleCreateTag}
+            onRenameTag={handleRenameTag}
+            onDeleteTag={handleDeleteTag}
+            t={t}
+          />
         ) : activeView === 'settings' ? (
           <SettingsPage
             isTauri={isTauri}
@@ -2351,6 +2577,8 @@ function App() {
         localName={localName}
         gitUrl={gitUrl}
         gitName={gitName}
+        tags={tags}
+        selectedTagIds={addModalTagIds}
         syncTargets={syncTargets}
         installedTools={installedTools}
         toolStatus={toolStatus}
@@ -2361,8 +2589,28 @@ function App() {
         onLocalNameChange={setLocalName}
         onGitUrlChange={setGitUrl}
         onGitNameChange={setGitName}
+        onToggleTag={handleToggleAddModalTag}
         onSyncTargetChange={handleSyncTargetChange}
         onSubmit={addModalTab === 'local' ? handleCreateLocal : handleCreateGit}
+        t={t}
+      />
+
+      <EditSkillTagsModal
+        key={
+          tagEditorSkill
+            ? `${tagEditorSkill.id}-${tagEditorSkill.tags.map((tag) => tag.id).join('-')}`
+            : 'edit-tags'
+        }
+        open={Boolean(tagEditorSkill)}
+        loading={loading}
+        skill={
+          tagEditorSkill
+            ? managedSkills.find((skill) => skill.id === tagEditorSkill.id) ?? tagEditorSkill
+            : null
+        }
+        tags={tags}
+        onRequestClose={handleCloseEditTags}
+        onSave={handleSaveSkillTags}
         t={t}
       />
 
@@ -2433,6 +2681,51 @@ function App() {
         }}
         t={t}
       />
+
+      {pendingDeleteTag ? (
+        <div className="modal-backdrop" onClick={loading ? undefined : handleCloseDeleteTag}>
+          <div
+            className="modal modal-delete tag-delete-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <div className="modal-title">{t('deleteTagTitle')}</div>
+              <button
+                className="modal-close"
+                type="button"
+                onClick={handleCloseDeleteTag}
+                disabled={loading}
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-body tag-delete-body">
+              {t('deleteTagConfirm', {
+                name: pendingDeleteTag.name,
+                count: pendingDeleteTag.skill_count,
+              })}
+            </div>
+            <div className="modal-footer">
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={handleCloseDeleteTag}
+                disabled={loading}
+              >
+                {t('cancel')}
+              </button>
+              <button
+                className="btn btn-danger"
+                type="button"
+                onClick={() => void handleConfirmDeleteTag()}
+                disabled={loading}
+              >
+                {t('deleteAction')}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <LocalPickModal
         open={showLocalPickModal}
