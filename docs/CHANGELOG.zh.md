@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-06-19
+
+### 新增
+- **WorkBuddy 工具适配**：新增全局 Skill 同步支持，目录为 `~/.workbuddy/skills/`（[PR #73](https://github.com/qufei1993/skills-hub/pull/73)）。
+- **CodeWhale 工具适配**：新增全局和项目级 Skill 同步支持，目录分别为 `~/.codewhale/skills/` 和 `.codewhale/skills/`（[#70](https://github.com/qufei1993/skills-hub/issues/70)、[PR #74](https://github.com/qufei1993/skills-hub/pull/74)）。
+- **Claude Code 插件 Skill 自动发现**：支持发现并导入用户级 Claude Code 插件中的 Skill，包括 `.claude-plugin/plugin.json` 声明的自定义 Skill 路径（[#69](https://github.com/qufei1993/skills-hub/issues/69)、[PR #75](https://github.com/qufei1993/skills-hub/pull/75)）。
+
 ## [0.6.1] - 2026-05-16
 
 ### 修复

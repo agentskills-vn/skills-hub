@@ -16,7 +16,7 @@ A cross-platform desktop app (Tauri + React) to manage Agent Skills in one place
 - **Scope controls**: Switch a skill between Global and Project scope, manage project directories, and filter My Skills by scope
 - **Skill detail view**: Click a skill name to browse its files with Markdown rendering and syntax highlighting (40+ languages)
 - **Unified view**: Managed skills, total skill count, scope badges, and per-tool activation status
-- **Onboarding migration**: Scan existing skills in installed tools, import into the Central Repo, and sync
+- **Onboarding migration**: Scan existing skills in installed tools and user-level Claude Code plugins, import them into the Central Repo, and sync
 - **Import sources**: Local folder / Git URL (including searchable multi-skill repo selection, `.claude/skills/` directory support)
 - **Update**: Refresh from source; propagate updates to copy-mode targets
 - **New tool detection**: Detect newly installed tools and prompt to sync managed skills

@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-06-19
+
+### Added
+- **WorkBuddy tool adapter**: Added global skill sync support via `~/.workbuddy/skills/` ([PR #73](https://github.com/qufei1993/skills-hub/pull/73)).
+- **CodeWhale tool adapter**: Added global and project-level skill sync via `~/.codewhale/skills/` and `.codewhale/skills/` ([#70](https://github.com/qufei1993/skills-hub/issues/70), [PR #74](https://github.com/qufei1993/skills-hub/pull/74)).
+- **Claude Code plugin skill discovery**: Existing user-level Claude Code plugin skills can now be discovered and imported, including custom skill paths declared in `.claude-plugin/plugin.json` ([#69](https://github.com/qufei1993/skills-hub/issues/69), [PR #75](https://github.com/qufei1993/skills-hub/pull/75)).
+
 ## [0.6.1] - 2026-05-16
 
 ### Fixed
