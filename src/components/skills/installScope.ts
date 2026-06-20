@@ -73,9 +73,37 @@ export const filterTargetsForScope = (
   return Object.fromEntries(
     Object.entries(targets).map(([toolId, selected]) => [
       toolId,
-      selected && (supportsProject.get(toolId) ?? true),
+      selected && supportsProject.get(toolId) === true,
     ]),
   )
+}
+
+export const normalizeProjectSharedTargets = (
+  targets: Record<string, boolean>,
+  tools: ToolOption[],
+  sharedProjectToolIdsByToolId: Record<string, string[]>,
+): Record<string, boolean> => {
+  const next = { ...targets }
+  const supportsProject = new Map(
+    tools.map((tool) => [tool.id, tool.supports_project_scope ?? true]),
+  )
+  const processed = new Set<string>()
+
+  for (const tool of tools) {
+    if (processed.has(tool.id)) continue
+    const shared = sharedProjectToolIdsByToolId[tool.id] ?? [tool.id]
+    const supported = shared.filter(
+      (toolId) => supportsProject.get(toolId) === true,
+    )
+    const selected = supported.some((toolId) => targets[toolId])
+
+    for (const toolId of shared) {
+      next[toolId] = supportsProject.get(toolId) === true && selected
+      processed.add(toolId)
+    }
+  }
+
+  return next
 }
 
 export const selectInstallToolIds = (
@@ -84,6 +112,7 @@ export const selectInstallToolIds = (
   installedToolIds: string[],
   scope: InstallScope,
   uniqueGlobalToolIds: (toolIds: string[]) => string[],
+  uniqueProjectToolIds: (toolIds: string[]) => string[],
 ): string[] => {
   const installed = new Set(installedToolIds)
   const selectedToolIds = tools
@@ -97,7 +126,7 @@ export const selectInstallToolIds = (
 
   return scope === 'global'
     ? uniqueGlobalToolIds(selectedToolIds)
-    : selectedToolIds
+    : uniqueProjectToolIds(selectedToolIds)
 }
 
 export const buildInstallSyncJobs = (

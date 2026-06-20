@@ -87,6 +87,7 @@ export type ToolInfoDto = {
   label: string
   installed: boolean
   skills_dir: string
+  project_skills_dir: string
   supports_project_scope: boolean
 }
 

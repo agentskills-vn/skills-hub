@@ -7,6 +7,7 @@ import {
   getUnsupportedToolsForScope,
   isLatestSaveBatch,
   isToolUnsupportedForScope,
+  normalizeProjectSharedTargets,
   normalizeProjectPaths,
   resolveProjectPathsUpdate,
   selectInstallToolIds,
@@ -95,6 +96,36 @@ describe('filterTargetsForScope', () => {
   })
 })
 
+describe('normalizeProjectSharedTargets', () => {
+  it('selects every supported tool when any tool in a project directory group is selected', () => {
+    expect(
+      normalizeProjectSharedTargets(
+        { cursor: false, codex: true, hermes: true },
+        tools,
+        {
+          cursor: ['cursor', 'codex', 'hermes'],
+          codex: ['cursor', 'codex', 'hermes'],
+          hermes: ['cursor', 'codex', 'hermes'],
+        },
+      ),
+    ).toEqual({ cursor: true, codex: true, hermes: false })
+  })
+
+  it('keeps a project directory group unselected when none of its supported tools is selected', () => {
+    expect(
+      normalizeProjectSharedTargets(
+        { cursor: false, codex: false, hermes: true },
+        tools,
+        {
+          cursor: ['cursor', 'codex', 'hermes'],
+          codex: ['cursor', 'codex', 'hermes'],
+          hermes: ['cursor', 'codex', 'hermes'],
+        },
+      ),
+    ).toEqual({ cursor: false, codex: false, hermes: false })
+  })
+})
+
 describe('isToolUnsupportedForScope', () => {
   it('only marks explicitly unsupported tools in project scope', () => {
     expect(isToolUnsupportedForScope(tools[0], 'project')).toBe(false)
@@ -140,8 +171,9 @@ describe('buildInstallSyncJobs', () => {
 })
 
 describe('selectInstallToolIds', () => {
-  it('filters uninstalled and project-unsupported tools without global directory deduplication', () => {
+  it('filters unsupported tools and deduplicates project directory groups', () => {
     const uniqueGlobalFn = (toolIds: string[]) => [toolIds[0]]
+    const uniqueProjectFn = (toolIds: string[]) => [toolIds[1]]
 
     expect(
       selectInstallToolIds(
@@ -150,8 +182,9 @@ describe('selectInstallToolIds', () => {
         ['cursor', 'hermes', 'codex'],
         'project',
         uniqueGlobalFn,
+        uniqueProjectFn,
       ),
-    ).toEqual(['cursor', 'codex'])
+    ).toEqual(['codex'])
   })
 
   it('deduplicates selected installed tools by global skills directory', () => {
@@ -164,6 +197,7 @@ describe('selectInstallToolIds', () => {
         ['cursor', 'hermes', 'codex'],
         'global',
         uniqueGlobalFn,
+        (toolIds) => toolIds,
       ),
     ).toEqual(['cursor', 'codex'])
   })
@@ -175,6 +209,7 @@ describe('selectInstallToolIds', () => {
         { cursor: true, hermes: true, codex: true },
         ['cursor'],
         'project',
+        (toolIds) => toolIds,
         (toolIds) => toolIds,
       ),
     ).toEqual(['cursor'])

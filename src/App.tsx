@@ -35,6 +35,7 @@ import {
   filterTargetsForScope,
   getAddedProjectPaths,
   isLatestSaveBatch,
+  normalizeProjectSharedTargets,
   normalizeProjectPaths,
   resolveProjectPathsUpdate,
   selectInstallToolIds,
@@ -550,6 +551,21 @@ function App() {
     return out
   }, [toolInfos])
 
+  const sharedProjectToolIdsByToolId = useMemo(() => {
+    const byDir: Record<string, string[]> = {}
+    for (const info of toolInfos) {
+      const dir = info.project_skills_dir
+      if (!byDir[dir]) byDir[dir] = []
+      byDir[dir].push(info.key)
+    }
+    const out: Record<string, string[]> = {}
+    for (const ids of Object.values(byDir)) {
+      if (ids.length <= 1) continue
+      for (const id of ids) out[id] = ids
+    }
+    return out
+  }, [toolInfos])
+
   const uniqueToolIdsBySkillsDir = useCallback(
     (toolIds: string[]) => {
       // Preserve UI order (tools array order), de-dupe by skills_dir.
@@ -560,6 +576,22 @@ function App() {
         if (!wanted.has(tool.key)) continue
         if (seen.has(tool.skills_dir)) continue
         seen.add(tool.skills_dir)
+        out.push(tool.key)
+      }
+      return out
+    },
+    [toolInfos],
+  )
+
+  const uniqueToolIdsByProjectSkillsDir = useCallback(
+    (toolIds: string[]) => {
+      const wanted = new Set(toolIds)
+      const seen = new Set<string>()
+      const out: string[] = []
+      for (const tool of toolInfos) {
+        if (!wanted.has(tool.key)) continue
+        if (seen.has(tool.project_skills_dir)) continue
+        seen.add(tool.project_skills_dir)
         out.push(tool.key)
       }
       return out
@@ -599,6 +631,7 @@ function App() {
         installedToolIds,
         installScope,
         uniqueToolIdsBySkillsDir,
+        uniqueToolIdsByProjectSkillsDir,
       )
       const jobs = buildInstallSyncJobs(
         toolIds,
@@ -666,6 +699,7 @@ function App() {
       toolLabelById,
       tools,
       uniqueToolIdsBySkillsDir,
+      uniqueToolIdsByProjectSkillsDir,
     ],
   )
 
@@ -1160,9 +1194,19 @@ function App() {
 
   const handleSyncTargetChange = useCallback(
     (toolId: string, checked: boolean) => {
-      const shared = sharedToolIdsByToolId[toolId] ?? [toolId]
-      if (shared.length > 1) {
-        const others = shared.filter((id) => id !== toolId)
+      const sharedByToolId =
+        installScope === 'project'
+          ? sharedProjectToolIdsByToolId
+          : sharedToolIdsByToolId
+      const shared = sharedByToolId[toolId] ?? [toolId]
+      const affected =
+        installScope === 'project'
+          ? shared.filter(
+              (id) => isInstalled(id) && toolSupportsProjectScope(id),
+            )
+          : shared
+      if (affected.length > 1) {
+        const others = affected.filter((id) => id !== toolId)
         const otherLabels = others.map((id) => toolLabelById[id] ?? id).join(', ')
         const ok = window.confirm(
           t('sharedDirConfirm', {
@@ -1174,23 +1218,45 @@ function App() {
       }
       setSyncTargets((prev) => {
         const next = { ...prev }
-        for (const id of shared) next[id] = checked
+        for (const id of affected) next[id] = checked
+        if (installScope === 'project') {
+          for (const id of shared) {
+            if (!toolSupportsProjectScope(id)) next[id] = false
+          }
+        }
         return next
       })
     },
-    [sharedToolIdsByToolId, t, toolLabelById],
+    [
+      installScope,
+      isInstalled,
+      sharedProjectToolIdsByToolId,
+      sharedToolIdsByToolId,
+      t,
+      toolLabelById,
+      toolSupportsProjectScope,
+    ],
   )
 
   const handleInstallScopeChange = useCallback(
     (nextScope: InstallScope) => {
       setInstallScope(nextScope)
       if (nextScope === 'project') {
-        setSyncTargets((current) =>
-          filterTargetsForScope(current, installedTools, nextScope),
-        )
+        setSyncTargets((current) => {
+          const filtered = filterTargetsForScope(
+            current,
+            installedTools,
+            nextScope,
+          )
+          return normalizeProjectSharedTargets(
+            filtered,
+            installedTools,
+            sharedProjectToolIdsByToolId,
+          )
+        })
       }
     },
-    [installedTools],
+    [installedTools, sharedProjectToolIdsByToolId],
   )
 
   const handleInstallProjectsChange = useCallback(

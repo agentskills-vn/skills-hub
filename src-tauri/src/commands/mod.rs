@@ -29,8 +29,9 @@ use crate::core::sync_engine::{
     copy_dir_recursive, sync_dir_for_tool_with_overwrite, sync_dir_hybrid, SyncMode,
 };
 use crate::core::tool_adapters::{
-    adapter_by_key, adapters_sharing_project_skills_dir, is_tool_installed, resolve_default_path,
-    resolve_project_path, supports_project_scope,
+    adapter_by_key, adapters_sharing_project_skills_dir, is_tool_installed,
+    project_relative_skills_dir, resolve_default_path, resolve_project_path,
+    supports_project_scope,
 };
 use uuid::Uuid;
 
@@ -111,6 +112,7 @@ pub struct ToolInfoDto {
     pub label: String,
     pub installed: bool,
     pub skills_dir: String,
+    pub project_skills_dir: String,
     pub supports_project_scope: bool,
 }
 
@@ -138,6 +140,7 @@ pub async fn get_tool_status(store: State<'_, SkillStore>) -> Result<ToolStatusD
                 label: adapter.display_name.to_string(),
                 installed: ok,
                 skills_dir,
+                project_skills_dir: project_relative_skills_dir(adapter).to_string(),
                 supports_project_scope: supports_project_scope(adapter),
             });
             if ok {
