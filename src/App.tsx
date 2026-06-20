@@ -1738,50 +1738,8 @@ function App() {
             },
           )
           await applySelectedAddModalTags(created.skill_id, created.name)
-          {
-            const selectedInstalledIds = tools
-              .filter((tool) => syncTargets[tool.id] && isInstalled(tool.id))
-              .map((t) => t.id)
-            const targets = uniqueToolIdsBySkillsDir(selectedInstalledIds)
-              .map((id) => tools.find((t) => t.id === id))
-              .filter(Boolean) as ToolOption[]
-            if (targets.length === 0) {
-              collectedErrors.push({
-                title: t('errors.unsyncedTitle', { name: created.name }),
-                message: t('errors.noSyncTargets'),
-              })
-            } else {
-              for (let ti = 0; ti < targets.length; ti++) {
-                const tool = targets[ti]
-                setActionMessage(
-                  t('actions.syncStep', {
-                    index: ti + 1,
-                    total: targets.length,
-                    name: created.name,
-                    tool: tool.label,
-                  }),
-                )
-                try {
-                  await invokeTauri('sync_skill_to_tool', {
-                    sourcePath: created.central_path,
-                    skillId: created.skill_id,
-                    tool: tool.id,
-                    name: created.name,
-                    overwriteIfSameContent: true,
-                  })
-                } catch (err) {
-                  const raw = err instanceof Error ? err.message : String(err)
-                  collectedErrors.push({
-                    title: t('errors.syncFailedTitle', {
-                      name: created.name,
-                      tool: tool.label,
-                    }),
-                    message: raw,
-                  })
-                }
-              }
-            }
-          }
+          const syncErrors = await syncInstalledSkill(created)
+          collectedErrors.push(...syncErrors)
         } catch (err) {
           const raw = err instanceof Error ? err.message : String(err)
           collectedErrors.push({
@@ -1851,50 +1809,8 @@ function App() {
             },
           )
           await applySelectedAddModalTags(created.skill_id, created.name)
-          {
-            const selectedInstalledIds = tools
-              .filter((tool) => syncTargets[tool.id] && isInstalled(tool.id))
-              .map((t) => t.id)
-            const targets = uniqueToolIdsBySkillsDir(selectedInstalledIds)
-              .map((id) => tools.find((t) => t.id === id))
-              .filter(Boolean) as ToolOption[]
-            if (targets.length === 0) {
-              collectedErrors.push({
-                title: t('errors.unsyncedTitle', { name: created.name }),
-                message: t('errors.noSyncTargets'),
-              })
-            } else {
-              for (let ti = 0; ti < targets.length; ti++) {
-                const tool = targets[ti]
-                setActionMessage(
-                  t('actions.syncStep', {
-                    index: ti + 1,
-                    total: targets.length,
-                    name: created.name,
-                    tool: tool.label,
-                  }),
-                )
-                try {
-                  await invokeTauri('sync_skill_to_tool', {
-                    sourcePath: created.central_path,
-                    skillId: created.skill_id,
-                    tool: tool.id,
-                    name: created.name,
-                    overwriteIfSameContent: true,
-                  })
-                } catch (err) {
-                  const raw = err instanceof Error ? err.message : String(err)
-                  collectedErrors.push({
-                    title: t('errors.syncFailedTitle', {
-                      name: created.name,
-                      tool: tool.label,
-                    }),
-                    message: raw,
-                  })
-                }
-              }
-            }
-          }
+          const syncErrors = await syncInstalledSkill(created)
+          collectedErrors.push(...syncErrors)
         } catch (err) {
           const raw = err instanceof Error ? err.message : String(err)
           collectedErrors.push({
