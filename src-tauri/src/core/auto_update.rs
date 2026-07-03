@@ -6,6 +6,10 @@ use super::skill_store::SkillStore;
 
 pub const AUTO_UPDATE_ENABLED_KEY: &str = "skill_auto_update_enabled";
 pub const AUTO_UPDATE_INTERVAL_HOURS_KEY: &str = "skill_auto_update_interval_hours";
+pub const AUTO_UPDATE_SCHEDULE_TYPE_KEY: &str = "skill_auto_update_schedule_type";
+pub const AUTO_UPDATE_INTERVAL_VALUE_KEY: &str = "skill_auto_update_interval_value";
+pub const AUTO_UPDATE_INTERVAL_UNIT_KEY: &str = "skill_auto_update_interval_unit";
+pub const AUTO_UPDATE_DAILY_TIME_KEY: &str = "skill_auto_update_daily_time";
 pub const AUTO_UPDATE_LAST_RUN_AT_KEY: &str = "skill_auto_update_last_run_at";
 pub const AUTO_UPDATE_LAST_STARTED_AT_KEY: &str = "skill_auto_update_last_started_at";
 pub const AUTO_UPDATE_LAST_FINISHED_AT_KEY: &str = "skill_auto_update_last_finished_at";
@@ -17,13 +21,48 @@ pub const AUTO_UPDATE_LAST_FAILED_KEY: &str = "skill_auto_update_last_failed";
 pub const AUTO_UPDATE_PROGRESS_KEY: &str = "skill_auto_update_progress";
 
 pub const DEFAULT_AUTO_UPDATE_INTERVAL_HOURS: i64 = 24;
+pub const DEFAULT_AUTO_UPDATE_DAILY_TIME: &str = "03:00";
 const MIN_AUTO_UPDATE_INTERVAL_HOURS: i64 = 1;
 const MAX_AUTO_UPDATE_INTERVAL_HOURS: i64 = 24 * 30;
+const MIN_AUTO_UPDATE_INTERVAL_MINUTES: i64 = 15;
+const MAX_AUTO_UPDATE_INTERVAL_MINUTES: i64 = 24 * 30 * 60;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AutoUpdateScheduleType {
+    Interval,
+    Daily,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AutoUpdateIntervalUnit {
+    Minutes,
+    Hours,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AutoUpdateSchedule {
+    pub schedule_type: AutoUpdateScheduleType,
+    pub interval_value: i64,
+    pub interval_unit: AutoUpdateIntervalUnit,
+    pub daily_time: String,
+}
+
+impl AutoUpdateSchedule {
+    pub fn interval_minutes(&self) -> i64 {
+        match self.interval_unit {
+            AutoUpdateIntervalUnit::Minutes => self.interval_value,
+            AutoUpdateIntervalUnit::Hours => self.interval_value.saturating_mul(60),
+        }
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AutoUpdateConfig {
     pub enabled: bool,
     pub interval_hours: i64,
+    pub schedule: AutoUpdateSchedule,
     pub local_skill_count: usize,
     pub protected_local_skill_count: usize,
     pub last_run_at: Option<i64>,
@@ -72,6 +111,7 @@ pub fn get_auto_update_config(store: &SkillStore) -> Result<AutoUpdateConfig> {
         .and_then(|v| v.parse::<i64>().ok())
         .filter(|v| (MIN_AUTO_UPDATE_INTERVAL_HOURS..=MAX_AUTO_UPDATE_INTERVAL_HOURS).contains(v))
         .unwrap_or(DEFAULT_AUTO_UPDATE_INTERVAL_HOURS);
+    let schedule = get_auto_update_schedule(store, interval_hours)?;
     let last_run_at = store
         .get_setting(AUTO_UPDATE_LAST_RUN_AT_KEY)?
         .and_then(|v| v.parse::<i64>().ok());
@@ -99,6 +139,7 @@ pub fn get_auto_update_config(store: &SkillStore) -> Result<AutoUpdateConfig> {
     Ok(AutoUpdateConfig {
         enabled,
         interval_hours,
+        schedule,
         local_skill_count,
         protected_local_skill_count,
         last_run_at,
@@ -117,15 +158,32 @@ pub fn set_auto_update_config(
     store: &SkillStore,
     config: AutoUpdateConfig,
 ) -> Result<AutoUpdateConfig> {
-    validate_interval(config.interval_hours)?;
+    validate_schedule(&config.schedule)?;
+    let interval_hours = schedule_to_legacy_interval_hours(&config.schedule);
     store.set_setting(
         AUTO_UPDATE_ENABLED_KEY,
         if config.enabled { "true" } else { "false" },
     )?;
+    store.set_setting(AUTO_UPDATE_INTERVAL_HOURS_KEY, &interval_hours.to_string())?;
     store.set_setting(
-        AUTO_UPDATE_INTERVAL_HOURS_KEY,
-        &config.interval_hours.to_string(),
+        AUTO_UPDATE_SCHEDULE_TYPE_KEY,
+        match config.schedule.schedule_type {
+            AutoUpdateScheduleType::Interval => "interval",
+            AutoUpdateScheduleType::Daily => "daily",
+        },
     )?;
+    store.set_setting(
+        AUTO_UPDATE_INTERVAL_VALUE_KEY,
+        &config.schedule.interval_value.to_string(),
+    )?;
+    store.set_setting(
+        AUTO_UPDATE_INTERVAL_UNIT_KEY,
+        match config.schedule.interval_unit {
+            AutoUpdateIntervalUnit::Minutes => "minutes",
+            AutoUpdateIntervalUnit::Hours => "hours",
+        },
+    )?;
+    store.set_setting(AUTO_UPDATE_DAILY_TIME_KEY, &config.schedule.daily_time)?;
     get_auto_update_config(store)
 }
 
@@ -137,8 +195,8 @@ pub fn is_auto_update_due(config: &AutoUpdateConfig, now_ms: i64) -> bool {
         return true;
     };
     let interval_ms = config
-        .interval_hours
-        .saturating_mul(60)
+        .schedule
+        .interval_minutes()
         .saturating_mul(60)
         .saturating_mul(1000);
     now_ms.saturating_sub(last_run_at) >= interval_ms
@@ -398,16 +456,108 @@ fn legacy_error_progress(
     })
 }
 
-fn validate_interval(interval_hours: i64) -> Result<()> {
-    if !(MIN_AUTO_UPDATE_INTERVAL_HOURS..=MAX_AUTO_UPDATE_INTERVAL_HOURS).contains(&interval_hours)
+fn get_auto_update_schedule(
+    store: &SkillStore,
+    legacy_interval_hours: i64,
+) -> Result<AutoUpdateSchedule> {
+    let schedule_type = match store
+        .get_setting(AUTO_UPDATE_SCHEDULE_TYPE_KEY)?
+        .as_deref()
+        .unwrap_or("interval")
+    {
+        "daily" => AutoUpdateScheduleType::Daily,
+        _ => AutoUpdateScheduleType::Interval,
+    };
+    let interval_unit = match store
+        .get_setting(AUTO_UPDATE_INTERVAL_UNIT_KEY)?
+        .as_deref()
+        .unwrap_or("hours")
+    {
+        "minutes" => AutoUpdateIntervalUnit::Minutes,
+        _ => AutoUpdateIntervalUnit::Hours,
+    };
+    let interval_value = store
+        .get_setting(AUTO_UPDATE_INTERVAL_VALUE_KEY)?
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(legacy_interval_hours);
+    let daily_time = store
+        .get_setting(AUTO_UPDATE_DAILY_TIME_KEY)?
+        .filter(|time| is_valid_daily_time(time))
+        .unwrap_or_else(|| DEFAULT_AUTO_UPDATE_DAILY_TIME.to_string());
+    let schedule = AutoUpdateSchedule {
+        schedule_type,
+        interval_value,
+        interval_unit,
+        daily_time,
+    };
+    Ok(if validate_schedule(&schedule).is_ok() {
+        schedule
+    } else {
+        default_schedule()
+    })
+}
+
+fn schedule_to_legacy_interval_hours(schedule: &AutoUpdateSchedule) -> i64 {
+    match schedule.schedule_type {
+        AutoUpdateScheduleType::Daily => DEFAULT_AUTO_UPDATE_INTERVAL_HOURS,
+        AutoUpdateScheduleType::Interval => {
+            let minutes = schedule.interval_minutes();
+            minutes.saturating_add(59).saturating_div(60).clamp(
+                MIN_AUTO_UPDATE_INTERVAL_HOURS,
+                MAX_AUTO_UPDATE_INTERVAL_HOURS,
+            )
+        }
+    }
+}
+
+fn validate_schedule(schedule: &AutoUpdateSchedule) -> Result<()> {
+    match schedule.schedule_type {
+        AutoUpdateScheduleType::Interval => validate_interval_minutes(schedule.interval_minutes()),
+        AutoUpdateScheduleType::Daily => {
+            if !is_valid_daily_time(&schedule.daily_time) {
+                anyhow::bail!("daily time must use HH:mm format");
+            }
+            Ok(())
+        }
+    }
+}
+
+fn validate_interval_minutes(interval_minutes: i64) -> Result<()> {
+    if !(MIN_AUTO_UPDATE_INTERVAL_MINUTES..=MAX_AUTO_UPDATE_INTERVAL_MINUTES)
+        .contains(&interval_minutes)
     {
         anyhow::bail!(
-            "interval hours must be between {} and {}",
-            MIN_AUTO_UPDATE_INTERVAL_HOURS,
-            MAX_AUTO_UPDATE_INTERVAL_HOURS
+            "interval minutes must be between {} and {}",
+            MIN_AUTO_UPDATE_INTERVAL_MINUTES,
+            MAX_AUTO_UPDATE_INTERVAL_MINUTES
         );
     }
     Ok(())
+}
+
+fn is_valid_daily_time(time: &str) -> bool {
+    let Some((hour, minute)) = time.split_once(':') else {
+        return false;
+    };
+    if hour.len() != 2 || minute.len() != 2 {
+        return false;
+    }
+    let Ok(hour) = hour.parse::<u8>() else {
+        return false;
+    };
+    let Ok(minute) = minute.parse::<u8>() else {
+        return false;
+    };
+    hour <= 23 && minute <= 59
+}
+
+fn default_schedule() -> AutoUpdateSchedule {
+    AutoUpdateSchedule {
+        schedule_type: AutoUpdateScheduleType::Interval,
+        interval_value: DEFAULT_AUTO_UPDATE_INTERVAL_HOURS,
+        interval_unit: AutoUpdateIntervalUnit::Hours,
+        daily_time: DEFAULT_AUTO_UPDATE_DAILY_TIME.to_string(),
+    }
 }
 
 fn now_ms() -> i64 {

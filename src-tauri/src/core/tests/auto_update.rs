@@ -5,6 +5,7 @@ use super::{
 };
 use crate::core::auto_update::{
     get_auto_update_config, is_auto_update_due, set_auto_update_config, AutoUpdateConfig,
+    AutoUpdateIntervalUnit, AutoUpdateSchedule, AutoUpdateScheduleType,
     AUTO_UPDATE_LAST_CHECKED_KEY, AUTO_UPDATE_LAST_ERROR_KEY, DEFAULT_AUTO_UPDATE_INTERVAL_HOURS,
 };
 use crate::core::skill_store::{SkillRecord, SkillStore};
@@ -36,6 +37,33 @@ fn make_skill(id: &str, source_type: &str, central_path: &str) -> SkillRecord {
     }
 }
 
+fn hourly_schedule(hours: i64) -> AutoUpdateSchedule {
+    AutoUpdateSchedule {
+        schedule_type: AutoUpdateScheduleType::Interval,
+        interval_value: hours,
+        interval_unit: AutoUpdateIntervalUnit::Hours,
+        daily_time: "03:00".to_string(),
+    }
+}
+
+fn minute_schedule(minutes: i64) -> AutoUpdateSchedule {
+    AutoUpdateSchedule {
+        schedule_type: AutoUpdateScheduleType::Interval,
+        interval_value: minutes,
+        interval_unit: AutoUpdateIntervalUnit::Minutes,
+        daily_time: "03:00".to_string(),
+    }
+}
+
+fn daily_schedule(time: &str) -> AutoUpdateSchedule {
+    AutoUpdateSchedule {
+        schedule_type: AutoUpdateScheduleType::Daily,
+        interval_value: 24,
+        interval_unit: AutoUpdateIntervalUnit::Hours,
+        daily_time: time.to_string(),
+    }
+}
+
 #[test]
 fn default_config_is_disabled_with_24_hour_interval() {
     let (_dir, store) = make_store();
@@ -57,6 +85,7 @@ fn config_roundtrips_and_rejects_invalid_interval() {
         AutoUpdateConfig {
             enabled: true,
             interval_hours: 12,
+            schedule: hourly_schedule(12),
             local_skill_count: 0,
             protected_local_skill_count: 0,
             last_run_at: None,
@@ -74,6 +103,7 @@ fn config_roundtrips_and_rejects_invalid_interval() {
 
     assert!(saved.enabled);
     assert_eq!(saved.interval_hours, 12);
+    assert_eq!(saved.schedule, hourly_schedule(12));
     assert_eq!(get_auto_update_config(&store).unwrap().interval_hours, 12);
 
     let err = set_auto_update_config(
@@ -81,6 +111,7 @@ fn config_roundtrips_and_rejects_invalid_interval() {
         AutoUpdateConfig {
             enabled: true,
             interval_hours: 0,
+            schedule: minute_schedule(10),
             local_skill_count: 0,
             protected_local_skill_count: 0,
             last_run_at: None,
@@ -99,10 +130,50 @@ fn config_roundtrips_and_rejects_invalid_interval() {
 }
 
 #[test]
+fn schedule_supports_minutes_and_daily_time() {
+    let (_dir, store) = make_store();
+
+    let saved = set_auto_update_config(
+        &store,
+        AutoUpdateConfig {
+            enabled: true,
+            interval_hours: 1,
+            schedule: minute_schedule(30),
+            local_skill_count: 0,
+            protected_local_skill_count: 0,
+            last_run_at: None,
+            last_started_at: None,
+            last_finished_at: None,
+            last_status: None,
+            last_error: None,
+            last_checked: 0,
+            last_updated: 0,
+            last_failed: 0,
+            progress: AutoUpdateProgressSnapshot::default(),
+        },
+    )
+    .unwrap();
+    assert_eq!(saved.interval_hours, 1);
+    assert_eq!(saved.schedule, minute_schedule(30));
+
+    let saved = set_auto_update_config(
+        &store,
+        AutoUpdateConfig {
+            schedule: daily_schedule("23:45"),
+            ..saved
+        },
+    )
+    .unwrap();
+    assert_eq!(saved.interval_hours, 24);
+    assert_eq!(saved.schedule, daily_schedule("23:45"));
+}
+
+#[test]
 fn due_check_respects_enabled_state_and_interval() {
     let disabled = AutoUpdateConfig {
         enabled: false,
         interval_hours: 24,
+        schedule: hourly_schedule(24),
         local_skill_count: 0,
         protected_local_skill_count: 0,
         last_run_at: Some(1_000),
@@ -130,11 +201,23 @@ fn due_check_respects_enabled_state_and_interval() {
     let recent = AutoUpdateConfig {
         enabled: true,
         interval_hours: 24,
+        schedule: hourly_schedule(24),
         last_run_at: Some(1_000),
         ..disabled
     };
     assert!(!is_auto_update_due(&recent, 1_000 + 23 * 60 * 60 * 1000));
     assert!(is_auto_update_due(&recent, 1_000 + 24 * 60 * 60 * 1000));
+
+    let minute_interval = AutoUpdateConfig {
+        schedule: minute_schedule(30),
+        last_run_at: Some(1_000),
+        ..recent
+    };
+    assert!(!is_auto_update_due(
+        &minute_interval,
+        1_000 + 29 * 60 * 1000
+    ));
+    assert!(is_auto_update_due(&minute_interval, 1_000 + 30 * 60 * 1000));
 }
 
 #[test]
