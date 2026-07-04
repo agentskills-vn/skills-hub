@@ -48,6 +48,7 @@ export type ManagedSkill = {
   created_at: number
   updated_at: number
   last_sync_at?: number | null
+  enabled: boolean
   status: string
   tags: TagDto[]
   targets: {

@@ -138,6 +138,7 @@ pub fn run() {
             commands::sync_skill_dir,
             commands::sync_skill_to_tool,
             commands::unsync_skill_from_tool,
+            commands::set_skill_enabled,
             commands::update_managed_skill,
             commands::search_github,
             commands::get_github_token,

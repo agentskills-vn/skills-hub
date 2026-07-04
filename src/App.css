@@ -158,6 +158,12 @@
   white-space: nowrap;
 }
 
+.bulk-mode-btn.active {
+  border-color: rgba(37, 99, 235, 0.45);
+  color: var(--accent-primary);
+  background: var(--accent-soft-bg);
+}
+
 .tag-filter-wrap {
   position: relative;
   flex-shrink: 0;
@@ -442,12 +448,74 @@
   position: relative;
 }
 
+.skill-card.bulk-mode {
+  grid-template-columns: 28px 48px 1fr auto;
+  gap: 16px;
+}
+
+.skill-card.bulk-selected {
+  border-color: rgba(37, 99, 235, 0.45);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.08);
+}
+
+.skill-card.disabled-skill {
+  background: var(--bg-panel);
+}
+
+.skill-card.disabled-skill .skill-icon,
+.skill-card.disabled-skill .skill-desc,
+.skill-card.disabled-skill .skill-meta-row {
+  opacity: 0.72;
+}
+
 .skill-card:hover {
   border-color: var(--border-strong);
   background: var(--bg-panel);
   transform: translateY(-1px);
   box-shadow: var(--shadow-sm);
   z-index: 1;
+}
+
+.bulk-skill-check {
+  width: 24px;
+  height: 24px;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.bulk-skill-check input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.bulk-skill-check span {
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--bg-app);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.bulk-skill-check input:checked + span {
+  border-color: var(--accent-primary);
+  background: var(--accent-primary);
+}
+
+.bulk-skill-check input:checked + span::after {
+  content: '';
+  width: 8px;
+  height: 5px;
+  border-left: 2px solid var(--accent-primary-fg);
+  border-bottom: 2px solid var(--accent-primary-fg);
+  transform: rotate(-45deg) translate(1px, -1px);
 }
 
 .skill-icon {
@@ -579,6 +647,19 @@
   background: rgba(34, 197, 94, 0.08);
 }
 
+.skill-disabled-badge {
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0 8px;
+  background: var(--bg-element);
+  color: var(--text-tertiary);
+  border: 1px solid var(--border-subtle);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .repo-pill {
   display: inline-flex;
   align-items: center;
@@ -674,6 +755,18 @@
 .tool-pill.active:hover {
   border-color: var(--status-success);
   transform: translateY(-1px);
+}
+
+.tool-pill.active:disabled {
+  cursor: not-allowed;
+  color: var(--text-tertiary);
+  border-color: var(--border-subtle);
+  background: var(--bg-element);
+}
+
+.tool-pill.active:disabled .status-badge {
+  background: var(--text-tertiary);
+  box-shadow: 0 0 0 2px var(--border-subtle);
 }
 
 .tool-pill.active.project:hover {
@@ -884,6 +977,16 @@
   border-color: var(--danger-soft-border);
 }
 
+.card-btn.power-action.enabled {
+  color: var(--status-success);
+}
+
+.card-btn.power-action:hover {
+  color: var(--accent-primary);
+  background: var(--accent-soft-bg);
+  border-color: var(--accent-soft-border);
+}
+
 .empty {
   padding: 16px;
   border-radius: var(--radius-lg);
@@ -933,6 +1036,18 @@
   background: var(--bg-element);
 }
 
+.btn-ghost {
+  color: var(--text-secondary);
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.btn-ghost:hover {
+  color: var(--text-primary);
+  background: var(--bg-element);
+}
+
 .btn-warning {
   background: var(--status-warning);
   border-color: var(--status-warning);
@@ -953,6 +1068,140 @@
 .btn-danger:hover {
   background: var(--danger-soft-border);
   border-color: var(--status-error);
+}
+
+.bulk-action-bar {
+  position: sticky;
+  left: 32px;
+  right: 32px;
+  bottom: 16px;
+  z-index: 20;
+  margin: 0 32px 16px;
+  min-height: 58px;
+  padding: 10px 12px 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--accent-soft-border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-app);
+  box-shadow: var(--shadow-lg);
+}
+
+.bulk-action-copy {
+  min-width: 0;
+}
+
+.bulk-action-copy strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.bulk-action-copy span {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.bulk-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.bulk-modal-subtitle {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.bulk-tool-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.bulk-tool-option {
+  min-height: 56px;
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-app);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.bulk-tool-option:hover,
+.bulk-tool-option.selected {
+  border-color: var(--accent-soft-border);
+  background: var(--accent-soft-bg);
+}
+
+.bulk-tool-check {
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-primary-fg);
+  background: var(--bg-panel);
+}
+
+.bulk-tool-option.selected .bulk-tool-check {
+  border-color: var(--accent-primary);
+  background: var(--accent-primary);
+}
+
+.bulk-tool-option strong,
+.bulk-tool-option small {
+  display: block;
+}
+
+.bulk-tool-option small {
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.bulk-tool-option.selected small {
+  color: var(--accent-primary);
+}
+
+.bulk-delete-list {
+  max-height: 156px;
+  overflow: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.bulk-delete-list span {
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--bg-element);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .btn:disabled,

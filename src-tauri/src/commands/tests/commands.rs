@@ -192,6 +192,7 @@ fn get_managed_skills_impl_maps_targets() {
         updated_at: 2,
         last_sync_at: None,
         last_seen_at: 1,
+        enabled: true,
         status: "ok".to_string(),
     };
     store.upsert_skill(&skill).unwrap();
@@ -214,6 +215,7 @@ fn get_managed_skills_impl_maps_targets() {
 
     let out = get_managed_skills_impl(&store).unwrap();
     assert_eq!(out.len(), 1);
+    assert!(out[0].enabled);
     assert_eq!(out[0].tags.len(), 1);
     assert_eq!(out[0].tags[0].name, "Frontend");
     assert_eq!(out[0].targets.len(), 1);

@@ -33,6 +33,7 @@ fn make_skill(id: &str, source_type: &str, central_path: &str) -> SkillRecord {
         updated_at: 1,
         last_sync_at: None,
         last_seen_at: 1,
+        enabled: true,
         status: "ok".to_string(),
     }
 }

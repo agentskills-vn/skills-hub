@@ -74,6 +74,7 @@ pub fn install_local_skill<R: tauri::Runtime>(
         updated_at: now,
         last_sync_at: None,
         last_seen_at: now,
+        enabled: true,
         status: "ok".to_string(),
     };
 
@@ -295,6 +296,7 @@ pub fn install_git_skill<R: tauri::Runtime>(
         updated_at: now,
         last_sync_at: None,
         last_seen_at: now,
+        enabled: true,
         status: "ok".to_string(),
     };
 
@@ -790,6 +792,7 @@ pub fn update_managed_skill_from_source<R: tauri::Runtime>(
         updated_at: now,
         last_sync_at: record.last_sync_at,
         last_seen_at: now,
+        enabled: record.enabled,
         status: "ok".to_string(),
     };
     store.upsert_skill(&updated)?;
@@ -799,6 +802,9 @@ pub fn update_managed_skill_from_source<R: tauri::Runtime>(
     let targets = store.list_skill_targets(skill_id)?;
     let mut updated_targets: Vec<String> = Vec::new();
     for t in targets {
+        if t.status == "disabled" {
+            continue;
+        }
         // Project scoped targets live under a project root and do not require global tool install detection.
         if t.scope == "global" {
             if let Some(adapter) = adapter_by_key(&t.tool) {
@@ -1242,6 +1248,7 @@ pub fn install_git_skill_from_selection<R: tauri::Runtime>(
         updated_at: now,
         last_sync_at: None,
         last_seen_at: now,
+        enabled: true,
         status: "ok".to_string(),
     };
     store.upsert_skill(&record)?;

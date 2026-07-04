@@ -968,7 +968,10 @@ pub async fn sync_skill_to_tool(
         if let Some(existing) =
             store.get_skill_target(&skillId, &tool, scope, project_path_for_record.as_deref())?
         {
-            if existing.target_path == target.to_string_lossy() && target.exists() {
+            if existing.status != "disabled"
+                && existing.target_path == target.to_string_lossy()
+                && target.exists()
+            {
                 return Ok::<_, anyhow::Error>(SyncResultDto {
                     mode_used: existing.mode,
                     target_path: existing.target_path,
@@ -1117,6 +1120,50 @@ pub async fn unsync_skill_from_tool(
             }
         }
 
+        Ok::<_, anyhow::Error>(())
+    })
+    .await
+    .map_err(|err| err.to_string())?
+    .map_err(format_anyhow_error)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn set_skill_enabled(
+    store: State<'_, SkillStore>,
+    skillId: String,
+    enabled: bool,
+) -> Result<(), String> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if !enabled {
+            let targets = store.list_skill_targets(&skillId)?;
+            let mut remove_failures: Vec<String> = Vec::new();
+            for target in targets {
+                if target.status != "disabled" {
+                    if let Err(err) = remove_path_any(&target.target_path) {
+                        remove_failures.push(format!("{}: {}", target.target_path, err));
+                    }
+                }
+                store.update_skill_target_status(
+                    &skillId,
+                    &target.tool,
+                    &target.scope,
+                    target.project_path.as_deref(),
+                    "disabled",
+                )?;
+            }
+            store.set_skill_enabled(&skillId, false)?;
+            if !remove_failures.is_empty() {
+                anyhow::bail!(
+                    "已停用 Skill，但清理部分工具目录失败：\n- {}",
+                    remove_failures.join("\n- ")
+                );
+            }
+            return Ok::<_, anyhow::Error>(());
+        }
+
+        store.set_skill_enabled(&skillId, true)?;
         Ok::<_, anyhow::Error>(())
     })
     .await
@@ -1293,6 +1340,7 @@ pub struct ManagedSkillDto {
     pub created_at: i64,
     pub updated_at: i64,
     pub last_sync_at: Option<i64>,
+    pub enabled: bool,
     pub status: String,
     pub tags: Vec<TagDto>,
     pub targets: Vec<SkillTargetDto>,
@@ -1594,6 +1642,7 @@ fn get_managed_skills_impl(store: &SkillStore) -> Result<Vec<ManagedSkillDto>, S
                 created_at: skill.created_at,
                 updated_at: skill.updated_at,
                 last_sync_at: skill.last_sync_at,
+                enabled: skill.enabled,
                 status: skill.status,
                 tags,
                 targets,
