@@ -3,6 +3,8 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 
+use super::auto_update::{AutoUpdateIntervalUnit, AutoUpdateSchedule, AutoUpdateScheduleType};
+
 pub const TASK_LABEL: &str = "com.skillshub.autoupdate";
 const BACKGROUND_TASK_ARGS: [&str; 3] = ["--background-task", "update-skills", "--force"];
 
@@ -15,14 +17,14 @@ pub struct SchedulerTaskStatus {
 #[derive(Clone, Debug)]
 pub struct SchedulerConfig {
     pub executable: PathBuf,
-    pub interval_hours: i64,
+    pub schedule: AutoUpdateSchedule,
 }
 
-pub fn current_scheduler_config(interval_hours: i64) -> Result<SchedulerConfig> {
+pub fn current_scheduler_config(schedule: AutoUpdateSchedule) -> Result<SchedulerConfig> {
     let current_exe = std::env::current_exe().context("resolve current executable")?;
     Ok(SchedulerConfig {
         executable: scheduler_executable_for_current_exe(&current_exe)?,
-        interval_hours,
+        schedule,
     })
 }
 
@@ -104,7 +106,22 @@ pub fn trigger_auto_update_task_now() -> Result<()> {
 #[cfg_attr(not(any(test, target_os = "macos")), allow(dead_code))]
 pub fn build_launch_agent_plist(config: &SchedulerConfig) -> String {
     let exe = xml_escape(&config.executable.to_string_lossy());
-    let interval_secs = config.interval_hours.saturating_mul(60).saturating_mul(60);
+    let schedule = match config.schedule.schedule_type {
+        AutoUpdateScheduleType::Interval => {
+            let interval_secs = config
+                .schedule
+                .interval_minutes()
+                .saturating_mul(60)
+                .max(60);
+            format!("  <key>StartInterval</key>\n  <integer>{interval_secs}</integer>")
+        }
+        AutoUpdateScheduleType::Daily => {
+            let (hour, minute) = split_daily_time(&config.schedule.daily_time);
+            format!(
+                "  <key>StartCalendarInterval</key>\n  <dict>\n    <key>Hour</key>\n    <integer>{hour}</integer>\n    <key>Minute</key>\n    <integer>{minute}</integer>\n  </dict>"
+            )
+        }
+    };
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -119,8 +136,7 @@ pub fn build_launch_agent_plist(config: &SchedulerConfig) -> String {
     <string>{}</string>
     <string>{}</string>
   </array>
-  <key>StartInterval</key>
-  <integer>{interval_secs}</integer>
+{schedule}
   <key>RunAtLoad</key>
   <false/>
   <key>StandardOutPath</key>
@@ -161,24 +177,44 @@ pub fn launchctl_kickstart_args(uid: u32) -> Vec<String> {
 
 #[cfg_attr(not(any(test, target_os = "windows")), allow(dead_code))]
 pub fn windows_schtasks_args(config: &SchedulerConfig) -> Vec<String> {
-    vec![
+    let mut args = vec![
         "/Create".to_string(),
         "/F".to_string(),
         "/TN".to_string(),
         TASK_LABEL.to_string(),
-        "/SC".to_string(),
-        "HOURLY".to_string(),
-        "/MO".to_string(),
-        config.interval_hours.to_string(),
-        "/TR".to_string(),
-        format!(
-            "\"{}\" {} {} {}",
-            config.executable.to_string_lossy(),
-            BACKGROUND_TASK_ARGS[0],
-            BACKGROUND_TASK_ARGS[1],
-            BACKGROUND_TASK_ARGS[2]
-        ),
-    ]
+    ];
+    match config.schedule.schedule_type {
+        AutoUpdateScheduleType::Interval => {
+            args.push("/SC".to_string());
+            match config.schedule.interval_unit {
+                AutoUpdateIntervalUnit::Minutes => {
+                    args.push("MINUTE".to_string());
+                    args.push("/MO".to_string());
+                    args.push(config.schedule.interval_value.to_string());
+                }
+                AutoUpdateIntervalUnit::Hours => {
+                    args.push("HOURLY".to_string());
+                    args.push("/MO".to_string());
+                    args.push(config.schedule.interval_value.to_string());
+                }
+            }
+        }
+        AutoUpdateScheduleType::Daily => {
+            args.push("/SC".to_string());
+            args.push("DAILY".to_string());
+            args.push("/ST".to_string());
+            args.push(config.schedule.daily_time.clone());
+        }
+    }
+    args.push("/TR".to_string());
+    args.push(format!(
+        "\"{}\" {} {} {}",
+        config.executable.to_string_lossy(),
+        BACKGROUND_TASK_ARGS[0],
+        BACKGROUND_TASK_ARGS[1],
+        BACKGROUND_TASK_ARGS[2]
+    ));
+    args
 }
 
 #[cfg_attr(not(any(test, target_os = "windows")), allow(dead_code))]
@@ -203,9 +239,16 @@ pub fn build_systemd_service(config: &SchedulerConfig) -> String {
 
 #[cfg_attr(not(any(test, all(unix, not(target_os = "macos")))), allow(dead_code))]
 pub fn build_systemd_timer(config: &SchedulerConfig) -> String {
+    let schedule = match config.schedule.schedule_type {
+        AutoUpdateScheduleType::Interval => {
+            format!("OnUnitActiveSec={}min", config.schedule.interval_minutes())
+        }
+        AutoUpdateScheduleType::Daily => {
+            format!("OnCalendar=*-*-* {}:00", config.schedule.daily_time)
+        }
+    };
     format!(
-        "[Unit]\nDescription=Run Skills Hub automatic skill update\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec={}h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n",
-        config.interval_hours
+        "[Unit]\nDescription=Run Skills Hub automatic skill update\n\n[Timer]\nOnBootSec=5min\n{schedule}\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n"
     )
 }
 
@@ -542,6 +585,16 @@ fn systemd_escape_path(path: &Path) -> String {
     } else {
         raw.to_string()
     }
+}
+
+fn split_daily_time(time: &str) -> (u8, u8) {
+    let Some((hour, minute)) = time.split_once(':') else {
+        return (3, 0);
+    };
+    (
+        hour.parse::<u8>().unwrap_or(3),
+        minute.parse::<u8>().unwrap_or(0),
+    )
 }
 
 #[cfg(test)]

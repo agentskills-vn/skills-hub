@@ -1,17 +1,47 @@
 use std::path::Path;
 
+use crate::core::auto_update::{
+    AutoUpdateIntervalUnit, AutoUpdateSchedule, AutoUpdateScheduleType,
+};
 use crate::core::system_scheduler::{
     build_launch_agent_plist, build_systemd_service, build_systemd_timer, launchctl_kickstart_args,
     scheduler_executable_for_current_exe, summarize_launchctl_status, systemd_start_args,
     windows_schtasks_args, windows_schtasks_run_args, SchedulerConfig,
 };
 
+fn hourly_schedule(hours: i64) -> AutoUpdateSchedule {
+    AutoUpdateSchedule {
+        schedule_type: AutoUpdateScheduleType::Interval,
+        interval_value: hours,
+        interval_unit: AutoUpdateIntervalUnit::Hours,
+        daily_time: "03:00".to_string(),
+    }
+}
+
+fn minute_schedule(minutes: i64) -> AutoUpdateSchedule {
+    AutoUpdateSchedule {
+        schedule_type: AutoUpdateScheduleType::Interval,
+        interval_value: minutes,
+        interval_unit: AutoUpdateIntervalUnit::Minutes,
+        daily_time: "03:00".to_string(),
+    }
+}
+
+fn daily_schedule(time: &str) -> AutoUpdateSchedule {
+    AutoUpdateSchedule {
+        schedule_type: AutoUpdateScheduleType::Daily,
+        interval_value: 24,
+        interval_unit: AutoUpdateIntervalUnit::Hours,
+        daily_time: time.to_string(),
+    }
+}
+
 #[test]
 fn mac_launch_agent_uses_current_user_interval_and_background_arg() {
     let plist = build_launch_agent_plist(&SchedulerConfig {
         executable: Path::new("/Applications/Skills Hub.app/Contents/MacOS/Skills Hub")
             .to_path_buf(),
-        interval_hours: 24,
+        schedule: hourly_schedule(24),
     });
 
     assert!(plist.contains("<key>StartInterval</key>"));
@@ -19,6 +49,22 @@ fn mac_launch_agent_uses_current_user_interval_and_background_arg() {
     assert!(plist.contains("--background-task</string>"));
     assert!(plist.contains("update-skills</string>"));
     assert!(plist.contains("--force</string>"));
+}
+
+#[test]
+fn mac_launch_agent_supports_daily_time() {
+    let plist = build_launch_agent_plist(&SchedulerConfig {
+        executable: Path::new("/Applications/Skills Hub.app/Contents/MacOS/Skills Hub")
+            .to_path_buf(),
+        schedule: daily_schedule("03:30"),
+    });
+
+    assert!(plist.contains("<key>StartCalendarInterval</key>"));
+    assert!(plist.contains("<key>Hour</key>"));
+    assert!(plist.contains("<integer>3</integer>"));
+    assert!(plist.contains("<key>Minute</key>"));
+    assert!(plist.contains("<integer>30</integer>"));
+    assert!(!plist.contains("<key>StartInterval</key>"));
 }
 
 #[test]
@@ -67,7 +113,7 @@ fn windows_task_uses_hourly_schedule_without_elevated_flag() {
     let args = windows_schtasks_args(&SchedulerConfig {
         executable: Path::new("C:\\Users\\may\\AppData\\Local\\SkillsHub\\SkillsHub.exe")
             .to_path_buf(),
-        interval_hours: 12,
+        schedule: hourly_schedule(12),
     });
 
     assert!(args.iter().any(|v| v == "/SC"));
@@ -81,6 +127,24 @@ fn windows_task_uses_hourly_schedule_without_elevated_flag() {
 }
 
 #[test]
+fn windows_task_supports_minutes_and_daily_time() {
+    let minute_args = windows_schtasks_args(&SchedulerConfig {
+        executable: Path::new("C:\\SkillsHub\\SkillsHub.exe").to_path_buf(),
+        schedule: minute_schedule(30),
+    });
+    assert!(minute_args.iter().any(|v| v == "MINUTE"));
+    assert!(minute_args.iter().any(|v| v == "30"));
+
+    let daily_args = windows_schtasks_args(&SchedulerConfig {
+        executable: Path::new("C:\\SkillsHub\\SkillsHub.exe").to_path_buf(),
+        schedule: daily_schedule("23:45"),
+    });
+    assert!(daily_args.iter().any(|v| v == "DAILY"));
+    assert!(daily_args.iter().any(|v| v == "/ST"));
+    assert!(daily_args.iter().any(|v| v == "23:45"));
+}
+
+#[test]
 fn windows_run_args_start_registered_task() {
     let args = windows_schtasks_run_args();
 
@@ -91,7 +155,7 @@ fn windows_run_args_start_registered_task() {
 fn linux_systemd_unit_uses_user_timer_interval() {
     let config = SchedulerConfig {
         executable: Path::new("/usr/bin/skills-hub").to_path_buf(),
-        interval_hours: 48,
+        schedule: hourly_schedule(48),
     };
 
     let service = build_systemd_service(&config);
@@ -101,8 +165,23 @@ fn linux_systemd_unit_uses_user_timer_interval() {
         service.contains("ExecStart=/usr/bin/skills-hub --background-task update-skills --force")
     );
     assert!(timer.contains("OnBootSec=5min"));
-    assert!(timer.contains("OnUnitActiveSec=48h"));
+    assert!(timer.contains("OnUnitActiveSec=2880min"));
     assert!(timer.contains("WantedBy=timers.target"));
+}
+
+#[test]
+fn linux_systemd_timer_supports_minutes_and_daily_time() {
+    let minute_timer = build_systemd_timer(&SchedulerConfig {
+        executable: Path::new("/usr/bin/skills-hub").to_path_buf(),
+        schedule: minute_schedule(45),
+    });
+    assert!(minute_timer.contains("OnUnitActiveSec=45min"));
+
+    let daily_timer = build_systemd_timer(&SchedulerConfig {
+        executable: Path::new("/usr/bin/skills-hub").to_path_buf(),
+        schedule: daily_schedule("04:15"),
+    });
+    assert!(daily_timer.contains("OnCalendar=*-*-* 04:15:00"));
 }
 
 #[test]
