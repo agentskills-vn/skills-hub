@@ -63,4 +63,3 @@ v0.7.0 的网络代理主要覆盖 GitHub 相关能力：
 - release notes 不再使用前端 `fetch` 直连 GitHub API。
 - Explore 在线搜索不再直接 `Client::new()`。
 - `npm run check` 通过。
-
